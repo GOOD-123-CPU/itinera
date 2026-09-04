@@ -1,0 +1,155 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String
+  role      String   @default("user") // "admin" or "user"
+  avatar    String?
+  phone     String?
+  district  String?  // User's home district in Beijing
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  chatSessions    ChatSession[]
+  reservations    Reservation[]
+  orders          Order[]
+  itineraries     Itinerary[]
+}
+
+model Venue {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   // park, playground, mall, cinema, museum, gallery, aquarium, zoo, night_market, food_street, sports, temple, other
+  district    String   // Beijing district
+  address     String
+  latitude    Float
+  longitude   Float
+  rating      Float    @default(4.0)
+  description String
+  priceLevel  Int      @default(2) // 1=budget, 2=moderate, 3=premium
+  openTime    String   @default("09:00")
+  closeTime   String   @default("21:00")
+  avgVisitMins Int     @default(120) // Average visit duration in minutes
+  childFriendly Boolean @default(false)
+  dietFriendly  Boolean @default(false)
+  tags        String   @default("") // Comma-separated tags
+  imageUrl    String?
+  capacity    Int      @default(100)
+  currentLoad Int      @default(30) // Current occupancy percentage
+  phone       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Restaurant {
+  id            String   @id @default(cuid())
+  name          String
+  cuisineType   String   // chinese, japanese, western, hotpot, buffet, family, diet, korean, thai, italian, other
+  district      String
+  address       String
+  latitude      Float
+  longitude     Float
+  rating        Float    @default(4.0)
+  description   String
+  priceLevel    Int      @default(2) // 1=budget, 2=moderate, 3=premium
+  avgPricePerPerson Int   @default(80) // RMB
+  openTime      String   @default("10:00")
+  closeTime     String   @default("22:00")
+  childFriendly Boolean  @default(false)
+  dietFriendly  Boolean  @default(false)
+  hasPrivateRoom Boolean @default(false)
+  tags          String   @default("")
+  imageUrl      String?
+  totalSeats    Int      @default(50)
+  currentWaitMins Int    @default(0) // Current wait time in minutes
+  availableSlots String  @default("11:00,12:00,13:00,17:00,18:00,19:00")
+  phone         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model ChatSession {
+  id          String   @id @default(cuid())
+  userId      String
+  title       String   @default("New Chat")
+  messages    String   @default("[]") // JSON array of messages
+  itineraryId String?
+  status      String   @default("active") // active, completed, archived
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user       User     @relation(fields: [userId], references: [id])
+  itinerary  Itinerary? @relation(fields: [itineraryId], references: [id])
+}
+
+model Itinerary {
+  id          String   @id @default(cuid())
+  userId      String
+  sessionIds  String   @default("[]") // JSON array of chat session IDs
+  title       String
+  description String   @default("")
+  date        String   // YYYY-MM-DD
+  startTime   String   // HH:mm
+  endTime     String   // HH:mm
+  groupType   String   @default("family") // family, friends, couple, solo
+  groupSize   Int      @default(3)
+  preferences String   @default("{}") // JSON: dietary, child age, etc.
+  steps       String   @default("[]") // JSON array of itinerary steps
+  status      String   @default("draft") // draft, confirmed, completed, cancelled
+  totalCost   Int      @default(0) // Estimated total cost in RMB
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user          User          @relation(fields: [userId], references: [id])
+  chatSessions  ChatSession[]
+  reservations  Reservation[]
+  orders        Order[]
+}
+
+model Reservation {
+  id             String   @id @default(cuid())
+  userId         String
+  itineraryId    String?
+  venueId        String?  // Optional - could be venue or restaurant
+  restaurantId   String?
+  venueName      String
+  date           String   // YYYY-MM-DD
+  time           String   // HH:mm
+  partySize      Int      @default(2)
+  status         String   @default("pending") // pending, confirmed, cancelled, completed
+  confirmationCode String?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user       User       @relation(fields: [userId], references: [id])
+  itinerary  Itinerary? @relation(fields: [itineraryId], references: [id])
+}
+
+model Order {
+  id             String   @id @default(cuid())
+  userId         String
+  itineraryId    String?
+  itemType       String   // cake, flowers, gift, other
+  itemName       String
+  deliveryTarget String   // Restaurant/venue name or address
+  deliveryTime   String?  // HH:mm
+  price          Int      @default(0) // in RMB
+  status         String   @default("pending") // pending, confirmed, delivered, cancelled
+  orderId        String?  // External order ID
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user       User       @relation(fields: [userId], references: [id])
+  itinerary  Itinerary? @relation(fields: [itineraryId], references: [id])
+}

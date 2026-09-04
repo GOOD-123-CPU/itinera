@@ -1,0 +1,27 @@
+services:
+  itinera:
+    build: .
+    image: itinera:latest
+    container_name: itinera
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # --- LLM (OpenAI-compatible; pick ONE provider) ---
+      LLM_BASE_URL: "https://api.deepseek.com/v1"   # or OpenAI / GLM / Moonshot / local Ollama
+      LLM_API_KEY: "${LLM_API_KEY}"                  # put your key in a .env file next to this compose file
+      LLM_MODEL: "deepseek-chat"
+      # --- App ---
+      NEXT_PUBLIC_APP_NAME: "Itinera"
+    volumes:
+      # Persist the SQLite database outside the container.
+      - itinera-db:/app/db
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  itinera-db:
