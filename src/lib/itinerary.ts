@@ -216,6 +216,8 @@ export function parseItineraryFromResponse(
 
     const lat = Number(s.latitude);
     const lng = Number(s.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
     steps.push({
       startTime: s.startTime,
       endTime: s.endTime,
@@ -227,10 +229,12 @@ export function parseItineraryFromResponse(
       address: typeof s.address === 'string' ? s.address : '',
       description: typeof s.description === 'string' ? s.description : '',
       cost: Number.isFinite(Number(s.cost)) ? Math.max(0, Number(s.cost)) : 0,
-      latitude: Number.isFinite(lat) ? lat : 0,
-      longitude: Number.isFinite(lng) ? lng : 0,
+      latitude: lat,
+      longitude: lng,
     });
   }
+
+  if (obj.date !== undefined && !isValidDate(obj.date)) return null;
 
   const itinerary: ItineraryData = {
     title: obj.title.trim(),
