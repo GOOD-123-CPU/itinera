@@ -1,7 +1,7 @@
 # --- Itinera production image (multi-stage, ~180MB) ---
 
 # ---------- Stage 1: dependencies ----------
-FROM node:20-alpine AS deps
+FROM node:25-alpine AS deps
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
@@ -9,7 +9,7 @@ COPY prisma ./prisma
 RUN npm ci --ignore-scripts && npx prisma generate
 
 # ---------- Stage 2: build ----------
-FROM node:20-alpine AS builder
+FROM node:25-alpine AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
@@ -22,7 +22,7 @@ ENV DATABASE_URL="file:../db/custom.db"
 RUN npx prisma generate && npx next build
 
 # ---------- Stage 3: runtime ----------
-FROM node:20-alpine AS runner
+FROM node:25-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
