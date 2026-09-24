@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseItineraryFromResponse, buildFallbackItinerary, type PlaceRecord } from '@/lib/itinerary';
+import { parseItineraryFromResponse, buildFallbackItinerary, validateItinerarySemantics, type PlaceRecord } from '@/lib/itinerary';
 
 function fenced(json: string): string {
   return '```itinerary\n' + json + '\n```';
@@ -62,6 +62,48 @@ describe('parseItineraryFromResponse', () => {
     const result = parseItineraryFromResponse(fenced(weird));
     expect(result).not.toBeNull();
     expect(result!.steps[0].cost).toBe(0);
+  });
+
+  it('rejects overlapping or reversed step time windows', () => {
+    const overlapping = JSON.parse(validItineraryJson);
+    overlapping.steps[1].startTime = '15:30';
+    expect(parseItineraryFromResponse(fenced(JSON.stringify(overlapping)))).toBeNull();
+
+    const reversed = JSON.parse(validItineraryJson);
+    reversed.steps[0].endTime = '13:59';
+    expect(parseItineraryFromResponse(fenced(JSON.stringify(reversed)))).toBeNull();
+  });
+
+  it('rejects invalid coordinates', () => {
+    const bad = JSON.parse(validItineraryJson);
+    bad.steps[0].latitude = 123;
+    expect(parseItineraryFromResponse(fenced(JSON.stringify(bad)))).toBeNull();
+  });
+
+  it('rejects model-selected IDs that were not in current retrieval candidates', () => {
+    const result = parseItineraryFromResponse(fenced(validItineraryJson), {
+      allowedVenueIds: ['v2'],
+      allowedRestaurantIds: ['r1'],
+    });
+    expect(result).toBeNull();
+  });
+
+  it('accepts IDs that were present in current retrieval candidates', () => {
+    const result = parseItineraryFromResponse(fenced(validItineraryJson), {
+      allowedVenueIds: ['v1'],
+      allowedRestaurantIds: ['r1'],
+    });
+    expect(result).not.toBeNull();
+  });
+});
+
+describe('validateItinerarySemantics', () => {
+  it('returns actionable issue codes for product-level validation failures', () => {
+    const itinerary = parseItineraryFromResponse(fenced(validItineraryJson))!;
+    itinerary.steps[1].startTime = '15:00';
+    const validation = validateItinerarySemantics(itinerary);
+    expect(validation.valid).toBe(false);
+    expect(validation.issues.some((issue) => issue.code === 'overlap')).toBe(true);
   });
 });
 
