@@ -218,7 +218,12 @@ ${allRestaurants.slice(0, 6).map((r, i) => `${i + 1}. ${r.name} (${r.cuisineType
     let aiResponse = aiContent || '抱歉，我暂时无法处理您的请求，请稍后重试。';
 
     // Phase 4: Check if LLM output included structured itinerary
-    let itinerary = parseItineraryFromResponse(aiResponse);
+    const allowedVenueIds = allVenues.map((v) => String(v.id));
+    const allowedRestaurantIds = allRestaurants.map((r) => String(r.id));
+    let itinerary = parseItineraryFromResponse(aiResponse, {
+      allowedVenueIds,
+      allowedRestaurantIds,
+    });
 
     // If LLM didn't generate structured data, append fallback itinerary
     if (!itinerary && (allVenues.length > 0 || allRestaurants.length > 0)) {
@@ -235,27 +240,44 @@ ${allRestaurants.slice(0, 6).map((r, i) => `${i + 1}. ${r.name} (${r.cuisineType
     const actionResults: Array<{ action: string; result: unknown }> = [];
 
     if (wantsBooking && itinerary) {
+      const venueById = new Map(allVenues.map((v) => [String(v.id), v]));
+      const restaurantById = new Map(allRestaurants.map((r) => [String(r.id), r]));
+
       for (const step of itinerary.steps) {
-        if (step.venueId || step.restaurantId) {
-          const confirmationCode = `R${Date.now().toString(36).toUpperCase()}`;
-          await db.reservation.create({
-            data: {
-              userId,
-              venueId: step.venueId || null,
-              restaurantId: step.restaurantId || null,
-              venueName: step.venueName,
-              date: itinerary.date,
-              time: step.startTime,
-              partySize: itinerary.groupSize,
-              status: 'confirmed',
-              confirmationCode,
-            },
-          });
-          actionResults.push({
-            action: 'reservation',
-            result: { confirmationCode, venueName: step.venueName, date: itinerary.date, time: step.startTime, partySize: itinerary.groupSize, status: 'confirmed' },
-          });
-        }
+        const canonical = step.venueId
+          ? venueById.get(step.venueId)
+          : step.restaurantId
+            ? restaurantById.get(step.restaurantId)
+            : undefined;
+
+        if (!canonical) continue;
+
+        const confirmationCode = `R${Date.now().toString(36).toUpperCase()}`;
+        const canonicalName = String(canonical.name);
+        await db.reservation.create({
+          data: {
+            userId,
+            venueId: step.venueId || null,
+            restaurantId: step.restaurantId || null,
+            venueName: canonicalName,
+            date: itinerary.date,
+            time: step.startTime,
+            partySize: itinerary.groupSize,
+            status: 'confirmed',
+            confirmationCode,
+          },
+        });
+        actionResults.push({
+          action: 'reservation',
+          result: {
+            confirmationCode,
+            venueName: canonicalName,
+            date: itinerary.date,
+            time: step.startTime,
+            partySize: itinerary.groupSize,
+            status: 'confirmed',
+          },
+        });
       }
     }
 

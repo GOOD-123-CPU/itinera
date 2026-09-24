@@ -51,16 +51,147 @@ export interface PlaceRecord {
 }
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function isValidTime(t: unknown): t is string {
   return typeof t === 'string' && TIME_RE.test(t);
+}
+
+function timeToMinutes(t: string): number {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+}
+
+function isValidDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !DATE_RE.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const d = new Date(Date.UTC(year, month - 1, day));
+  return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day;
+}
+
+export interface ItineraryValidationOptions {
+  allowedVenueIds?: Iterable<string>;
+  allowedRestaurantIds?: Iterable<string>;
+}
+
+export interface ItineraryValidationIssue {
+  code:
+    | 'invalid_date'
+    | 'invalid_outer_window'
+    | 'invalid_step_window'
+    | 'overlap'
+    | 'invalid_coordinates'
+    | 'unknown_venue'
+    | 'unknown_restaurant';
+  stepIndex?: number;
+  message: string;
+}
+
+export interface ItineraryValidationResult {
+  valid: boolean;
+  issues: ItineraryValidationIssue[];
+}
+
+/**
+ * Semantic validation for already parsed itinerary data.
+ *
+ * The JSON parser answers "is this shaped like an itinerary?".
+ * This function answers conservative product-level questions that can be
+ * checked without external APIs: time ordering, coordinate ranges, and
+ * whether model-selected IDs came from the current retrieval candidates.
+ */
+export function validateItinerarySemantics(
+  itinerary: ItineraryData,
+  options: ItineraryValidationOptions = {},
+): ItineraryValidationResult {
+  const issues: ItineraryValidationIssue[] = [];
+  const venueIds = options.allowedVenueIds ? new Set(options.allowedVenueIds) : null;
+  const restaurantIds = options.allowedRestaurantIds ? new Set(options.allowedRestaurantIds) : null;
+
+  if (!isValidDate(itinerary.date)) {
+    issues.push({ code: 'invalid_date', message: 'date must be a real YYYY-MM-DD calendar date' });
+  }
+
+  const outerStart = timeToMinutes(itinerary.startTime);
+  const outerEnd = timeToMinutes(itinerary.endTime);
+  if (outerEnd <= outerStart) {
+    issues.push({ code: 'invalid_outer_window', message: 'itinerary endTime must be after startTime' });
+  }
+
+  let previousEnd: number | null = null;
+  itinerary.steps.forEach((step, stepIndex) => {
+    const start = timeToMinutes(step.startTime);
+    const end = timeToMinutes(step.endTime);
+
+    if (end <= start) {
+      issues.push({
+        code: 'invalid_step_window',
+        stepIndex,
+        message: 'step endTime must be after startTime',
+      });
+    }
+
+    if (previousEnd !== null && start < previousEnd) {
+      issues.push({
+        code: 'overlap',
+        stepIndex,
+        message: 'step starts before the previous step ends',
+      });
+    }
+    previousEnd = end;
+
+    if (
+      !Number.isFinite(step.latitude) ||
+      !Number.isFinite(step.longitude) ||
+      step.latitude < -90 ||
+      step.latitude > 90 ||
+      step.longitude < -180 ||
+      step.longitude > 180
+    ) {
+      issues.push({
+        code: 'invalid_coordinates',
+        stepIndex,
+        message: 'coordinates are outside valid latitude/longitude ranges',
+      });
+    }
+
+    if (venueIds && step.venueId && !venueIds.has(step.venueId)) {
+      issues.push({
+        code: 'unknown_venue',
+        stepIndex,
+        message: 'venueId was not present in the current retrieval candidates',
+      });
+    }
+
+    if (restaurantIds && step.restaurantId && !restaurantIds.has(step.restaurantId)) {
+      issues.push({
+        code: 'unknown_restaurant',
+        stepIndex,
+        message: 'restaurantId was not present in the current retrieval candidates',
+      });
+    }
+  });
+
+  const firstStart = timeToMinutes(itinerary.steps[0].startTime);
+  const lastEnd = timeToMinutes(itinerary.steps[itinerary.steps.length - 1].endTime);
+  if (outerStart > firstStart || outerEnd < lastEnd) {
+    issues.push({
+      code: 'invalid_outer_window',
+      message: 'itinerary start/end must contain all step time windows',
+    });
+  }
+
+  return { valid: issues.length === 0, issues };
 }
 
 /**
  * Extract a ```itinerary ...``` fenced JSON block from an LLM response.
  * Validates the shape defensively — LLM output is untrusted input.
  */
-export function parseItineraryFromResponse(content: string): ItineraryData | null {
+export function parseItineraryFromResponse(
+  content: string,
+  options: ItineraryValidationOptions = {},
+): ItineraryData | null {
   if (!content) return null;
   const match = content.match(/```itinerary\s*([\s\S]*?)```/);
   if (!match) return null;
@@ -101,9 +232,9 @@ export function parseItineraryFromResponse(content: string): ItineraryData | nul
     });
   }
 
-  return {
+  const itinerary: ItineraryData = {
     title: obj.title.trim(),
-    date: typeof obj.date === 'string' ? obj.date : new Date().toISOString().split('T')[0],
+    date: isValidDate(obj.date) ? obj.date : new Date().toISOString().split('T')[0],
     startTime: isValidTime(obj.startTime) ? obj.startTime : steps[0].startTime,
     endTime: isValidTime(obj.endTime) ? obj.endTime : steps[steps.length - 1].endTime,
     groupType: typeof obj.groupType === 'string' ? obj.groupType : 'friends',
@@ -111,6 +242,8 @@ export function parseItineraryFromResponse(content: string): ItineraryData | nul
     totalCost: Number.isFinite(Number(obj.totalCost)) ? Math.max(0, Number(obj.totalCost)) : 0,
     steps,
   };
+
+  return validateItinerarySemantics(itinerary, options).valid ? itinerary : null;
 }
 
 /**
