@@ -74,10 +74,34 @@ describe('parseItineraryFromResponse', () => {
     expect(parseItineraryFromResponse(fenced(JSON.stringify(reversed)))).toBeNull();
   });
 
+  it('rejects invalid calendar dates instead of silently normalizing them', () => {
+    for (const date of ['2026-02-30', '2026-13-01', '2026-00-10']) {
+      const bad = JSON.parse(validItineraryJson);
+      bad.date = date;
+      expect(parseItineraryFromResponse(fenced(JSON.stringify(bad)))).toBeNull();
+    }
+  });
+
+  it('still permits a missing date to use the parser fallback', () => {
+    const missingDate = JSON.parse(validItineraryJson);
+    delete missingDate.date;
+    const result = parseItineraryFromResponse(fenced(JSON.stringify(missingDate)));
+    expect(result).not.toBeNull();
+    expect(result!.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
   it('rejects invalid coordinates', () => {
-    const bad = JSON.parse(validItineraryJson);
-    bad.steps[0].latitude = 123;
-    expect(parseItineraryFromResponse(fenced(JSON.stringify(bad)))).toBeNull();
+    const outOfRange = JSON.parse(validItineraryJson);
+    outOfRange.steps[0].latitude = 123;
+    expect(parseItineraryFromResponse(fenced(JSON.stringify(outOfRange)))).toBeNull();
+
+    const nonNumeric = JSON.parse(validItineraryJson);
+    nonNumeric.steps[0].latitude = 'not-a-number';
+    expect(parseItineraryFromResponse(fenced(JSON.stringify(nonNumeric)))).toBeNull();
+
+    const missing = JSON.parse(validItineraryJson);
+    delete missing.steps[0].longitude;
+    expect(parseItineraryFromResponse(fenced(JSON.stringify(missing)))).toBeNull();
   });
 
   it('rejects model-selected IDs that were not in current retrieval candidates', () => {
